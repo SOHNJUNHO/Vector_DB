@@ -73,25 +73,35 @@ Hybrid search + Streamlit demo
 ## Repository Layout
 
 ```text
-vector_db_pipeline/
-├── config/settings.yaml       # Parser, model, path, and Qdrant config
-├── scripts/run_pipeline.sh    # Convenience runner with checks
-├── services/streamlit/app.py  # Search demo
-├── src/
-│   ├── run_pipeline.py        # Ingestion orchestration
-│   ├── parser_backends.py     # docling_vlm and pure_vlm backends
-│   ├── document_parser.py     # Docling-first parser implementation
-│   ├── vlm_client.py          # Shared VLM task wrapper
-│   ├── artifacts.py           # Per-document artifacts and manifests
-│   ├── parse_result.py        # Normalized parser models
-│   ├── embed_text.py          # Text embeddings
-│   ├── embed_visual.py        # Visual/text multimodal embeddings
-│   ├── qdrant_store.py        # Qdrant schema, indexing, retrieval
-│   └── query_agent.py         # Query parsing and answer generation
-└── tests/
+Vector_DB/
+├── README.md
+├── png/                       # Input image pages
+├── json/                      # Source metadata/data artifacts
+└── vector_db_pipeline/
+    ├── config/settings.yaml
+    ├── scripts/run_pipeline.sh
+    ├── services/streamlit/app.py
+    ├── src/
+    │   ├── run_pipeline.py
+    │   ├── parser_backends.py
+    │   ├── document_parser.py
+    │   ├── vlm_client.py
+    │   ├── artifacts.py
+    │   ├── parse_result.py
+    │   ├── embed_text.py
+    │   ├── embed_visual.py
+    │   ├── qdrant_store.py
+    │   └── query_agent.py
+    └── tests/
 ```
 
 ## Quick Start
+
+Run commands from the pipeline directory:
+
+```bash
+cd vector_db_pipeline
+```
 
 ### 1. Install
 
@@ -176,7 +186,7 @@ Find a hard calculus problem with a diagram
 
 ## Parser Configuration
 
-`config/settings.yaml` controls the parser strategy:
+`vector_db_pipeline/config/settings.yaml` controls the parser strategy:
 
 ```yaml
 markdown_backend: "docling_vlm"
@@ -199,7 +209,7 @@ Recommended modes:
 Artifacts are saved under:
 
 ```text
-data/artifacts/{document_id}/
+vector_db_pipeline/data/artifacts/{document_id}/
   manifest.json
   parsed_document.json
   chunks.jsonl
@@ -245,11 +255,12 @@ section_id
 ## Quality Checks
 
 ```bash
+cd vector_db_pipeline
 ruff check src services tests
 pytest -q
 ```
 
-Current test suite uses mocks for model calls, Docling, and Qdrant so it can run
+The test suite uses mocks for model calls, Docling, and Qdrant so it can run
 quickly without external services.
 
 ## Why This Project Matters

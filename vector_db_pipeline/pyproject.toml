@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "vector-db-pipeline"
 version = "0.1.0"
 description = "Multimodal ingestion and retrieval pipeline for Korean exam question images."
-readme = "README.md"
+readme = "../README.md"
 requires-python = ">=3.10"
 authors = [
     { name = "Sohn" },
