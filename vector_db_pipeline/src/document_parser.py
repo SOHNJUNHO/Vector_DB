@@ -126,9 +126,12 @@ class DocumentParser:
     def _get_converter(self):
         if self._converter is None:
             from docling.document_converter import DocumentConverter
-            from docling.pipeline_options import PipelineOptions
+            try:
+                from docling.datamodel.pipeline_options import PdfPipelineOptions as _Opts
+            except ImportError:
+                from docling.pipeline_options import PipelineOptions as _Opts  # type: ignore[no-redef]
 
-            opts = PipelineOptions()
+            opts = _Opts()
             opts.generate_picture_images = True
             converter_kwargs = {}
             if "pipeline_options" in inspect.signature(DocumentConverter).parameters:

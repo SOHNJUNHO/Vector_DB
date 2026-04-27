@@ -49,6 +49,8 @@ class SectionDetector:
         prev_section_title: str | None = None,
     ) -> SectionBoundary:
         context = f"Extracted text from this page:\n\n{docling_markdown}\n\n"
+        if prev_section_title:
+            context += f'Previous section title: "{prev_section_title}"\n\n'
         full_prompt = context + self._prompt
         b64 = encode_image_to_base64(image_path)
 

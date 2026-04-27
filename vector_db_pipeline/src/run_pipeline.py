@@ -110,12 +110,14 @@ def _build_parser(config: dict) -> ParserBackend:
             from document_parser import DocumentParser
             from vlm_generate import init_vlm_client
 
-        print("\n=== Step 2: Checking vLLM server ===")
+        api_key = os.environ.get("FIREWORKS_API_KEY") or "not-needed"
+        print("\n=== Step 2: Checking VLM endpoint ===")
         health_check(
             api_base=vlm_cfg["api_base"],
             model_name=vlm_cfg["model_name"],
             retries=vlm_cfg["health_check_retries"],
             delay=vlm_cfg["health_check_delay"],
+            api_key=api_key,
         )
         vlm_client = init_vlm_client(vlm_cfg["api_base"])
 
@@ -150,12 +152,14 @@ def _build_parser(config: dict) -> ParserBackend:
         from vlm_generate import generate_markdown as vlm_generate
         from vlm_generate import init_vlm_client
 
-    print("\n=== Step 2: Checking vLLM server ===")
+    api_key = os.environ.get("FIREWORKS_API_KEY") or "not-needed"
+    print("\n=== Step 2: Checking VLM endpoint ===")
     health_check(
         api_base=vlm_cfg["api_base"],
         model_name=vlm_cfg["model_name"],
         retries=vlm_cfg["health_check_retries"],
         delay=vlm_cfg["health_check_delay"],
+        api_key=api_key,
     )
     vlm_client = init_vlm_client(vlm_cfg["api_base"])
     print(f"[Backend] vLLM — {vlm_cfg['api_base']} / {vlm_cfg['model_name']}")

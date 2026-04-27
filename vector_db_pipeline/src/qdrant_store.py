@@ -18,6 +18,7 @@ from qdrant_client.models import (
     FieldCondition,
     Filter,
     MatchValue,
+    PayloadSchemaType,
     PointStruct,
     VectorParams,
 )
@@ -47,6 +48,7 @@ class QdrantStore:
         """Create Section and Figure collections if they don't already exist."""
         self._create_section_collection(visual_dim, text_dim)
         self._create_figure_collection(visual_dim, text_dim)
+        self._ensure_payload_indexes()
 
     def _create_section_collection(self, visual_dim: int, text_dim: int):
         if self.client.collection_exists(self.collection_name):
@@ -63,6 +65,15 @@ class QdrantStore:
             },
         )
         print(f"[Qdrant] Collection '{self.collection_name}' created.")
+
+    def _ensure_payload_indexes(self):
+        """Create payload indexes required for filtered search. Idempotent."""
+        for field in ("difficulty", "topic", "document_id"):
+            self.client.create_payload_index(
+                collection_name=self.collection_name,
+                field_name=field,
+                field_schema=PayloadSchemaType.KEYWORD,
+            )
 
     def _create_figure_collection(self, visual_dim: int, text_dim: int):
         if self.client.collection_exists(self.figure_collection_name):
@@ -168,9 +179,10 @@ class QdrantStore:
         limit: int = 5,
     ) -> list[dict]:
         query_filter = self._difficulty_filter(difficulty)
-        results = self.client.search(
+        response = self.client.query_points(
             collection_name=self.collection_name,
-            query_vector=(vector_name, vector),
+            query=vector,
+            using=vector_name,
             query_filter=query_filter,
             limit=limit,
             with_payload=True,
@@ -180,7 +192,7 @@ class QdrantStore:
                 "score": hit.score,
                 **(hit.payload or {}),
             }
-            for hit in results
+            for hit in response.points
         ]
 
     @staticmethod

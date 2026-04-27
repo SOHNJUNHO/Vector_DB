@@ -10,6 +10,7 @@ the image content into structured markdown with sections:
 """
 
 import base64
+import os
 
 from openai import OpenAI
 
@@ -91,11 +92,10 @@ def generate_markdown(
 
 def init_vlm_client(api_base: str) -> OpenAI:
     """
-    Create an OpenAI-compatible client pointing to a local vLLM server.
+    Create an OpenAI-compatible client.
 
-    The API key is a dummy value — vLLM doesn't authenticate.
+    Reads FIREWORKS_API_KEY from the environment for hosted APIs.
+    Falls back to "not-needed" for local vLLM which requires no auth.
     """
-    return OpenAI(
-        api_key="not-needed",  # vLLM does not require authentication
-        base_url=api_base,
-    )
+    api_key = os.environ.get("FIREWORKS_API_KEY") or "not-needed"
+    return OpenAI(api_key=api_key, base_url=api_base)
