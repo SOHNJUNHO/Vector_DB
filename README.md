@@ -9,6 +9,10 @@ The project is designed around a practical document-AI pattern: use Docling for
 layout-aware extraction, call a Qwen VLM only where visual understanding is
 needed, and keep a pure-VLM backend available for fallback and benchmarking.
 
+## Demo
+
+![Streamlit demo](assets/streamlit.png)
+
 ## Highlights
 
 - **Hybrid document parsing**: Docling extracts structure, formulas, tables, and

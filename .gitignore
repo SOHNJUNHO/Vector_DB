@@ -3,3 +3,6 @@
 json
 plan.md
 .DS_Store
+assets/*
+!assets/
+!assets/streamlit.png
