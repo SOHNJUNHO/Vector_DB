@@ -1,0 +1,108 @@
+# ============================================================
+# Vector DB Pipeline — Configuration
+# ============================================================
+
+# Markdown generation backend: "vlm" | "llamaparse" | "docling_vlm"
+markdown_backend: "docling_vlm"
+
+# --- Pipeline behavior ---
+pipeline:
+  batch_size: 50
+
+# --- Data paths ---
+data:
+  # Root directory containing png/ folder
+  raw_dir: "/Users/sohn/Desktop/Vector_DB"
+  # Output dir for VLM-generated markdown (intermediate artifacts)
+  output_dir: "/Users/sohn/Desktop/Vector_DB/vector_db_pipeline/data/processed"
+
+# --- VLM (Qwen3.5-VL-9B via vLLM on cloud) ---
+vlm:
+  # vLLM server URL — update this to your RunPod/AWS endpoint
+  # Examples:
+  #   Local:    "http://localhost:8000/v1"
+  #   RunPod:   "https://<pod-id>-8000.proxy.runpod.net/v1"
+  #   AWS:      "http://<ec2-public-ip>:8000/v1"
+  api_base: "http://localhost:8000/v1"
+  model_name: "Qwen/Qwen3.5-VL-9B"
+  max_tokens: 4096
+  temperature: 0.1          # Low temp for deterministic output
+  health_check_retries: 3   # Retries before giving up
+  health_check_delay: 5     # Seconds between retries
+
+# --- Visual embedding (Qwen3-VL-Embedding-2B) ---
+embed_visual:
+  model_name: "Qwen/Qwen3-VL-Embedding-2B"
+  batch_size: 8
+
+# --- Text embedding (Qwen3-Embedding) ---
+embed_text:
+  # Smallest text-only model for speed; swap to 4B if you prefer quality
+  model_name: "Qwen/Qwen3-Embedding-0.6B"
+  batch_size: 32
+
+# --- Docling + VLM hybrid parser ---
+document_parser:
+  # VLM enrichment triggers — math and tables handled by Docling natively
+  # Options: figures, chemical_formulas, handwritten, low_quality_page
+  complexity_triggers: [figures, chemical_formulas]
+
+  # Docling page quality grade below this value triggers full-page VLM fallback (0.0–1.0)
+  quality_threshold: 0.5
+
+  # Prompts — change per project without touching code
+  section_detection_prompt: |
+    Given this scanned page image and its extracted text, return JSON only:
+    {"is_new_section": true|false, "section_title": "string or null", "section_level": 1|2|3|null}
+    Mark a new section only when you see a clear heading that begins a new major topic.
+
+  figure_description_prompt: |
+    Describe this figure in full detail: all visual elements, labels, axes, values, and trends.
+    Write any math in LaTeX ($...$ inline, $$...$$ block). Be precise and complete.
+
+  metadata_prompt: |
+    Analyze this document section. Return ONLY a valid JSON object:
+    {
+      "subject": "...",
+      "difficulty": "easy|medium|hard",
+      "topic": "...",
+      "has_math": true|false,
+      "has_diagram": true|false
+    }
+
+# --- LlamaParse (alternative backend, no GPU required) ---
+llamaparse:
+  api_key: ""          # Leave blank to use LLAMA_CLOUD_API_KEY env var instead
+  language: "ko"       # Language hint for the parser
+
+# --- Qdrant Cloud ---
+qdrant:
+  # Qdrant Cloud cluster URL (e.g. https://xyz.qdrant.io)
+  # For local Docker: "http://localhost:6333"
+  url: ""
+  api_key: ""              # Leave blank to use QDRANT_API_KEY env var
+  collection_name: "exam_questions"
+  visual_dim: 1024         # Qwen3-VL-Embedding-2B output dim
+  text_dim: 1024           # Qwen3-Embedding-0.6B output dim
+
+# --- Query agent ---
+query:
+  default_limit: 5
+  retrieval_mode: "hybrid"   # "text" | "hybrid"
+  hybrid_alpha: 0.7          # 1.0 = text only, 0.0 = visual-text only
+  answer_context_limit: 3
+  parse_prompt: |
+    Given this query: "{query}"
+    Return ONLY valid JSON:
+    {{"topic": "...", "difficulty": "easy|medium|hard|null", "limit": 5}}
+    - topic: the mathematical concept or subject area being asked about
+    - difficulty: null if the user did not specify a difficulty level
+    - limit: number of results requested (default 5)
+  answer_prompt: |
+    Answer the user query using only the retrieved context.
+    User query: "{query}"
+
+    Retrieved context:
+    {context}
+
+    Write a concise answer. If the context is not enough, say what is missing.
