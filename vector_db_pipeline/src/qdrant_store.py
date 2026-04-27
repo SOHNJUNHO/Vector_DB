@@ -128,11 +128,12 @@ class QdrantStore:
         if not records:
             return
         _vector_keys = {"text_vector", "visual_vector"}
+        _internal_keys = _vector_keys | {"point_id"}
         points = [
             PointStruct(
-                id=str(uuid.uuid4()),
+                id=record.get("point_id") or str(uuid.uuid4()),
                 vector={k: record[k] for k in _vector_keys if k in record},
-                payload={k: v for k, v in record.items() if k not in _vector_keys},
+                payload={k: v for k, v in record.items() if k not in _internal_keys},
             )
             for record in records
         ]
@@ -148,11 +149,12 @@ class QdrantStore:
         if not records:
             return
         _vector_keys = {"figure_visual_vector", "figure_text_vector"}
+        _internal_keys = _vector_keys | {"point_id"}
         points = [
             PointStruct(
-                id=str(uuid.uuid4()),
+                id=record.get("point_id") or str(uuid.uuid4()),
                 vector={k: record[k] for k in _vector_keys if k in record},
-                payload={k: v for k, v in record.items() if k not in _vector_keys},
+                payload={k: v for k, v in record.items() if k not in _internal_keys},
             )
             for record in records
         ]
@@ -179,10 +181,9 @@ class QdrantStore:
         limit: int = 5,
     ) -> list[dict]:
         query_filter = self._difficulty_filter(difficulty)
-        response = self.client.query_points(
+        hits = self.client.search(
             collection_name=self.collection_name,
-            query=vector,
-            using=vector_name,
+            query_vector=(vector_name, vector),
             query_filter=query_filter,
             limit=limit,
             with_payload=True,
@@ -192,7 +193,7 @@ class QdrantStore:
                 "score": hit.score,
                 **(hit.payload or {}),
             }
-            for hit in response.points
+            for hit in hits
         ]
 
     @staticmethod

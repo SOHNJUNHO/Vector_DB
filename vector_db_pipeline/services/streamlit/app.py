@@ -53,7 +53,7 @@ def _load_agent():
     )
 
     vllm_base = _secret("VLLM_API_BASE") or config["vlm"]["api_base"]
-    vlm = init_vlm_client(vllm_base)
+    vlm = init_vlm_client(vllm_base, api_key=_secret("FIREWORKS_API_KEY") or None)
 
     embedder = TextEmbedder(model_name=config["embed_text"]["model_name"])
     visual_embedder = None

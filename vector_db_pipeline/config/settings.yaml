@@ -2,8 +2,15 @@
 # Vector DB Pipeline — Configuration
 # ============================================================
 
-# Markdown generation backend: "vlm" | "llamaparse" | "docling_vlm"
+# Markdown generation backend: "pure_vlm" | "docling_vlm"
 markdown_backend: "docling_vlm"
+
+# --- Parser routing ---
+parser:
+  default_backend: "docling_vlm"
+  enable_pure_vlm_fallback: true
+  benchmark_backends: []
+  quality_threshold: 0.5
 
 # --- Pipeline behavior ---
 pipeline:
@@ -15,6 +22,8 @@ data:
   raw_dir: "/Users/sohn/Desktop/Vector_DB"
   # Output dir for VLM-generated markdown (intermediate artifacts)
   output_dir: "/Users/sohn/Desktop/Vector_DB/vector_db_pipeline/data/processed"
+  # Stable per-document parser outputs and manifest state
+  artifact_dir: "/Users/sohn/Desktop/Vector_DB/vector_db_pipeline/data/artifacts"
 
 # --- VLM inference ---
 # Fireworks AI (recommended — no GPU setup, pay per token):

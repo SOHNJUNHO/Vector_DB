@@ -19,17 +19,32 @@ import logging
 import os
 import re
 import tempfile
-import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
 try:
-    from .parse_result import FigureResult, SectionResult
+    from .enrichment_policy import EnrichmentPolicy
+    from .parse_result import (
+        FigureResult,
+        SectionResult,
+        deterministic_id,
+        make_section_result,
+        sections_to_parsed_document,
+    )
     from .section_detector import SectionBoundary, SectionDetector
+    from .vlm_client import VlmClient
     from .vlm_generate import encode_image_to_base64
 except ImportError:
-    from parse_result import FigureResult, SectionResult
+    from enrichment_policy import EnrichmentPolicy
+    from parse_result import (
+        FigureResult,
+        SectionResult,
+        deterministic_id,
+        make_section_result,
+        sections_to_parsed_document,
+    )
     from section_detector import SectionBoundary, SectionDetector
+    from vlm_client import VlmClient
     from vlm_generate import encode_image_to_base64
 
 logger = logging.getLogger(__name__)
@@ -57,7 +72,16 @@ class DocumentParser:
       - Metadata: once per section (text-only call, no image)
     """
 
-    def __init__(self, vlm_client, vlm_model_name: str, config: dict):
+    parser_backend = "docling_vlm"
+
+    def __init__(
+        self,
+        vlm_client,
+        vlm_model_name: str,
+        config: dict,
+        *,
+        vlm_service: VlmClient | None = None,
+    ):
         self._client = vlm_client
         self._model_name = vlm_model_name
         self._cfg = config
@@ -65,6 +89,11 @@ class DocumentParser:
             config.get("complexity_triggers", ["figures", "chemical_formulas"])
         )
         self._quality_threshold = float(config.get("quality_threshold", 0.5))
+        self._policy = EnrichmentPolicy(
+            triggers=list(self._triggers),
+            quality_threshold=self._quality_threshold,
+            enable_pure_vlm_fallback=bool(config.get("enable_pure_vlm_fallback", True)),
+        )
         self._fig_prompt = config.get(
             "figure_description_prompt",
             "Describe this figure in full detail: all visual elements, labels, "
@@ -75,6 +104,7 @@ class DocumentParser:
             'Analyze this content. Return ONLY valid JSON:\n{"topic": "", "has_diagram": false}',
         )
         self._converter = None  # lazy init — Docling is slow to import
+        self._vlm = vlm_service
 
     # ------------------------------------------------------------------
     # Public API
@@ -84,15 +114,15 @@ class DocumentParser:
         """Single PNG → one flat SectionResult (no section hierarchy)."""
         page = self._docling_page(image_path, page_number=0)
         markdown = self._enrich(image_path, page)
-        return SectionResult(
-            section_id=str(uuid.uuid4()),
+        return make_section_result(
+            document_id=document_id,
             section_title=document_id,
             section_level=0,
             page_range=(0, 0),
             markdown=markdown,
             metadata=self._metadata(markdown),
             figures=self._process_figures(page, image_path),
-            document_id=document_id,
+            parser_backend=self.parser_backend,
         )
 
     def parse_document(self, page_paths: list[str], document_id: str) -> list[SectionResult]:
@@ -119,6 +149,19 @@ class DocumentParser:
         raw_sections = _group_pages(page_paths, pages, boundaries, document_id)
         return [self._finalize_section(raw) for raw in raw_sections]
 
+    def parse_parsed_document(self, page_paths: list[str], document_id: str):
+        sections = (
+            [self.parse_single(page_paths[0], document_id)]
+            if len(page_paths) == 1
+            else self.parse_document(page_paths, document_id)
+        )
+        return sections_to_parsed_document(
+            document_id=document_id,
+            page_paths=page_paths,
+            sections=sections,
+            parser_backend=self.parser_backend,
+        )
+
     # ------------------------------------------------------------------
     # Docling layer
     # ------------------------------------------------------------------
@@ -127,9 +170,13 @@ class DocumentParser:
         if self._converter is None:
             from docling.document_converter import DocumentConverter
             try:
-                from docling.datamodel.pipeline_options import PdfPipelineOptions as _Opts
+                from docling.datamodel.pipeline_options import (
+                    PdfPipelineOptions as _Opts,
+                )
             except ImportError:
-                from docling.pipeline_options import PipelineOptions as _Opts  # type: ignore[no-redef]
+                from docling.pipeline_options import (
+                    PipelineOptions as _Opts,  # type: ignore[no-redef]
+                )
 
             opts = _Opts()
             opts.generate_picture_images = True
@@ -181,11 +228,10 @@ class DocumentParser:
     # ------------------------------------------------------------------
 
     def _should_enrich(self, page: _PageResult) -> bool:
-        if page.has_figures and (
-            "figures" in self._triggers or "chemical_formulas" in self._triggers
-        ):
-            return True
-        return page.quality_grade < self._quality_threshold
+        return self._policy.should_enrich(
+            has_figures=page.has_figures,
+            quality=page.quality_grade,
+        )
 
     def _enrich(self, image_path: str, page: _PageResult) -> str:
         """Return VLM-enriched markdown if triggered; otherwise return Docling output."""
@@ -201,9 +247,13 @@ class DocumentParser:
         return self._vlm_image_call(image_path, prompt)
 
     def _describe_figure(self, fig_path: str) -> str:
+        if self._vlm is not None:
+            return self._vlm.describe_figure(fig_path, self._fig_prompt)
         return self._vlm_image_call(fig_path, self._fig_prompt)
 
     def _metadata(self, markdown: str) -> dict:
+        if self._vlm is not None:
+            return self._vlm.extract_metadata(markdown, self._meta_prompt)
         response = self._vlm_text_call(f"{markdown}\n\n{self._meta_prompt}")
         parsed = _parse_json(response, context="section metadata")
         if parsed:
@@ -277,7 +327,13 @@ class DocumentParser:
             description = self._describe_figure(fig_path)
             results.append(
                 FigureResult(
-                    figure_id=f"{Path(image_path).stem}_p{page.page_number}_f{i}",
+                    figure_id=deterministic_id(
+                        Path(image_path).stem,
+                        page.page_number,
+                        i,
+                        "figure",
+                        prefix="fig_",
+                    ),
                     page_number=page.page_number,
                     description=description,
                     cropped_image_path=fig_path,
@@ -292,15 +348,16 @@ class DocumentParser:
             parts.append(self._enrich(path, page))
             all_figures.extend(self._process_figures(page, path))
         markdown = "\n\n".join(parts)
-        return SectionResult(
-            section_id=str(uuid.uuid4()),
+        return make_section_result(
+            document_id=raw["document_id"],
             section_title=raw["title"],
             section_level=raw["level"],
             page_range=(raw["start"], raw["end"]),
             markdown=markdown,
             metadata=self._metadata(markdown),
             figures=all_figures,
-            document_id=raw["document_id"],
+            parser_backend=self.parser_backend,
+            chunk_index=raw.get("chunk_index", raw["start"]),
         )
 
 
@@ -370,6 +427,7 @@ def _group_pages(
                 "page_paths": [path],
                 "pages": [page],
                 "document_id": document_id,
+                "chunk_index": len(sections),
             }
         else:
             current["end"] = i

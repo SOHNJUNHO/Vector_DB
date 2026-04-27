@@ -4,8 +4,18 @@ parse_result.py — Shared data models for the document parser pipeline.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import hashlib
+from dataclasses import asdict, dataclass, field
 from typing import Protocol
+
+_PARSER_VERSION = "v1"
+
+
+def deterministic_id(*parts: object, prefix: str = "") -> str:
+    """Return a stable short ID for parser artifacts and Qdrant point IDs."""
+    raw = "::".join(str(part) for part in parts)
+    digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:24]
+    return f"{prefix}{digest}" if prefix else digest
 
 
 @dataclass
@@ -26,6 +36,29 @@ class SectionResult:
     document_id: str
     metadata: dict = field(default_factory=dict)
     figures: list[FigureResult] = field(default_factory=list)
+    parser_backend: str = ""
+
+
+@dataclass
+class ParsedPage:
+    page_index: int
+    image_path: str
+    markdown: str
+    parser_backend: str
+    quality: float = 1.0
+
+
+@dataclass
+class ParsedDocument:
+    document_id: str
+    pages: list[ParsedPage]
+    chunks: list[SectionResult]
+    figures: list[FigureResult] = field(default_factory=list)
+    metadata: dict = field(default_factory=dict)
+    artifacts: dict = field(default_factory=dict)
+
+    def to_dict(self) -> dict:
+        return asdict(self)
 
 
 class ParserBackend(Protocol):
@@ -36,6 +69,73 @@ class ParserBackend(Protocol):
 
     def parse_document(self, page_paths: list[str], document_id: str) -> list[SectionResult]:
         ...
+
+    def parse_parsed_document(
+        self,
+        page_paths: list[str],
+        document_id: str,
+    ) -> ParsedDocument:
+        ...
+
+
+def make_section_result(
+    *,
+    document_id: str,
+    section_title: str,
+    section_level: int,
+    page_range: tuple[int, int],
+    markdown: str,
+    metadata: dict | None = None,
+    figures: list[FigureResult] | None = None,
+    parser_backend: str = "",
+    chunk_index: int = 0,
+) -> SectionResult:
+    section_id = deterministic_id(
+        document_id,
+        page_range[0],
+        page_range[1],
+        chunk_index,
+        parser_backend,
+        _PARSER_VERSION,
+        prefix="sec_",
+    )
+    return SectionResult(
+        section_id=section_id,
+        section_title=section_title,
+        section_level=section_level,
+        page_range=page_range,
+        markdown=markdown,
+        document_id=document_id,
+        metadata=metadata or {},
+        figures=figures or [],
+        parser_backend=parser_backend,
+    )
+
+
+def sections_to_parsed_document(
+    *,
+    document_id: str,
+    page_paths: list[str],
+    sections: list[SectionResult],
+    parser_backend: str,
+) -> ParsedDocument:
+    pages = [
+        ParsedPage(
+            page_index=i,
+            image_path=path,
+            markdown="",
+            parser_backend=parser_backend,
+        )
+        for i, path in enumerate(page_paths)
+    ]
+    figures = [fig for section in sections for fig in section.figures]
+    return ParsedDocument(
+        document_id=document_id,
+        pages=pages,
+        chunks=sections,
+        figures=figures,
+        metadata={"parser_backend": parser_backend},
+    )
 
 
 def validate_section_result(section: SectionResult, expected_document_id: str) -> SectionResult:
