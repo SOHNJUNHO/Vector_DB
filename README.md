@@ -1,276 +1,228 @@
-# Multimodal Vector DB Pipeline
+# Korean Math Exam — Vector DB Pipeline
 
-Production-minded ingestion and retrieval pipeline for scanned Korean math exam
-questions. The system converts image-heavy documents into structured markdown,
-generates text and visual embeddings, stores them in Qdrant, and exposes hybrid
-semantic search through a Streamlit demo.
+A local-first retrieval pipeline for Korean high school math exam images.
+Each PNG is analyzed by a vision-language model, embedded with a text encoder,
+and stored in a vector database for semantic search.
 
-The project is designed around a practical document-AI pattern: use Docling for
-layout-aware extraction, call a Qwen VLM only where visual understanding is
-needed, and keep a pure-VLM backend available for fallback and benchmarking.
+Designed to be **simple, clean, and fully offline** — no cloud APIs required after setup.
 
-## Demo
+---
 
-![Streamlit demo](assets/streamlit.png)
+## How It Works
 
-## Highlights
-
-- **Hybrid document parsing**: Docling extracts structure, formulas, tables, and
-  figure crops; Qwen VLM enriches diagrams, low-quality pages, metadata, and
-  section boundaries.
-- **Pure VLM backend**: Qwen-only page transcription can be enabled for fallback
-  or parser quality benchmarks.
-- **Multimodal retrieval**: Qwen text embeddings and Qwen VL embeddings are
-  indexed as named vectors in Qdrant.
-- **Reproducible ingestion**: deterministic IDs, per-document artifacts, and
-  manifest status prevent accidental duplicate or partial indexing.
-- **Operational shape**: batch processing, health checks, payload indexes,
-  config-driven backends, tests, linting, and a small search UI.
-
-## Architecture
-
-```text
-PNG pages or page folders
-        |
-        v
-Document discovery
-        |
-        v
-Parser backend
-  - docling_vlm: Docling + selective Qwen VLM
-  - pure_vlm: Qwen VLM direct transcription
-        |
-        v
-Normalized parsed document
-  - pages
-  - chunks
-  - figures
-  - metadata
-  - artifact paths
-        |
-        v
-Embeddings
-  - text_vector: Qwen3-Embedding
-  - visual_vector: Qwen3-VL-Embedding
-        |
-        v
-Qdrant
-  - exam_questions
-  - exam_questions_figures
-        |
-        v
-Hybrid search + Streamlit demo
 ```
+477 Korean math exam PNGs
+          |
+          v
+  [ Document Discovery ]
+    png/*.png  →  flat list of documents
+          |
+          v
+  [ VLM Parser — Ollama ]
+    Qwen2.5-VL:7b (GGUF, local)
+    One call per image  →  structured JSON
+    {
+      "text":        "full transcription (Korean + LaTeX)",
+      "concepts":    ["이차방정식", "판별식"],
+      "description": "수식과 그래프가 포함된 문제"
+    }
+          |
+          v
+  [ Text Embedder — HuggingFace ]
+    Qwen3-Embedding-0.6B (local, INT8 on CUDA)
+    embed(text + description)  →  1024-dim vector
+          |
+          v
+  [ Qdrant — local Docker ]
+    Single collection: exam_questions
+    INT8 scalar quantization
+    Payload: document_id, text, concepts, description
+          |
+          v
+  [ Query Agent ]
+    Natural language  →  VLM parse  →  embed  →  search  →  answer
+```
+
+---
 
 ## Tech Stack
 
-| Area | Tooling |
-| --- | --- |
-| Document parsing | Docling, Qwen VLM |
-| VLM serving | Fireworks AI or local OpenAI-compatible vLLM |
-| Text embedding | `Qwen/Qwen3-Embedding-0.6B` |
-| Visual embedding | `Qwen/Qwen3-VL-Embedding-2B` |
-| Vector database | Qdrant named vectors |
-| App demo | Streamlit |
-| Quality gates | pytest, Ruff, pre-commit |
+| Component | Tool | Notes |
+|---|---|---|
+| VLM inference | [Ollama](https://ollama.com) + Qwen2.5-VL:7b | GGUF, runs locally, OpenAI-compatible API |
+| Text embedding | `Qwen/Qwen3-Embedding-0.6B` | HuggingFace transformers, INT8 on CUDA |
+| Vector database | [Qdrant](https://qdrant.tech) | Local Docker, INT8 scalar quantization |
+| Language | Python 3.10+ | |
+| Quality | pytest, Ruff, pre-commit | 48 tests, all mocked |
 
-## Repository Layout
+**Why two backends?**
+Ollama handles vision inference (GGUF quantization makes 7B models viable on consumer GPUs).
+HuggingFace transformers handles embedding (`Qwen3-VL-Embedding` isn't in Ollama yet, and INT8 via `bitsandbytes` gives fine-grained memory control).
 
-```text
+---
+
+## Project Layout
+
+```
 Vector_DB/
 ├── README.md
-├── png/                       # Input image pages
-├── json/                      # Source metadata/data artifacts
+├── png/                              # 477 Korean math exam PNGs
 └── vector_db_pipeline/
-    ├── config/settings.yaml
-    ├── scripts/run_pipeline.sh
-    ├── services/streamlit/app.py
+    ├── config/
+    │   └── settings.yaml             # All config — VLM, embedder, Qdrant, prompts
     ├── src/
-    │   ├── run_pipeline.py
-    │   ├── parser_backends.py
-    │   ├── document_parser.py
-    │   ├── vlm_client.py
-    │   ├── artifacts.py
-    │   ├── parse_result.py
-    │   ├── embed_text.py
-    │   ├── embed_visual.py
-    │   ├── qdrant_store.py
-    │   └── query_agent.py
-    └── tests/
+    │   ├── run_pipeline.py           # Orchestrator — discovery → parse → embed → store
+    │   ├── document_parser.py        # Pure VLM parser (one call per PNG)
+    │   ├── vlm_client.py             # Ollama wrapper (OpenAI-compatible)
+    │   ├── vlm_generate.py           # System prompt + base64 encode
+    │   ├── embed_text.py             # Qwen3-Embedding with INT8 quantization
+    │   ├── qdrant_store.py           # Collection schema, insert, search
+    │   ├── query_agent.py            # NL query → VLM parse → embed → search → answer
+    │   ├── data_loader.py            # PNG discovery (flat mode)
+    │   ├── health_check.py           # Ollama readiness check
+    │   ├── artifacts.py              # Per-doc result.json + manifest (resumable runs)
+    │   └── parse_result.py           # QuestionResult dataclass
+    └── tests/                        # 48 mocked unit tests
 ```
+
+---
 
 ## Quick Start
-
-Run commands from the pipeline directory:
-
-```bash
-cd vector_db_pipeline
-```
 
 ### 1. Install
 
 ```bash
+cd vector_db_pipeline
 uv venv .venv --python 3.10
-uv pip install --python .venv/bin/python -e ".[dev,streamlit]"
+uv pip install --python .venv/bin/python -e ".[dev]"
 source .venv/bin/activate
 ```
 
-### 2. Configure Environment
+### 2. Start local services
+
+```bash
+# Qdrant
+docker run -d --name qdrant -p 6333:6333 qdrant/qdrant
+
+# Ollama — pull the VLM (downloads ~4GB GGUF once)
+ollama pull qwen2.5-vl:7b
+ollama serve
+```
+
+### 3. Configure
 
 ```bash
 cp .env.example .env
+# No changes needed for local setup — defaults point to localhost
 ```
 
-Required for hosted inference and Qdrant Cloud:
+All pipeline settings live in `config/settings.yaml`. Key values:
 
-```text
-FIREWORKS_API_KEY=...
-QDRANT_URL=...
-QDRANT_API_KEY=...
+```yaml
+vlm:
+  api_base: "http://localhost:11434/v1"
+  model_name: "qwen2.5-vl:7b"
+
+embed_text:
+  model_name: "Qwen/Qwen3-Embedding-0.6B"
+  quantization: "int8"   # bitsandbytes INT8 on CUDA; auto-fallback on MPS/CPU
+
+qdrant:
+  url: "http://localhost:6333"
+  collection_name: "exam_questions"
+  text_dim: 1024
 ```
 
-For local VLM serving, set:
-
-```text
-VLLM_API_BASE=http://localhost:8000/v1
-```
-
-For local Qdrant:
+### 4. Run ingestion
 
 ```bash
-docker run -d --name qdrant -p 6333:6333 qdrant/qdrant:latest
-```
-
-### 3. Add Input Data
-
-Flat mode, where each PNG is one document:
-
-```text
-png/
-  question_001.png
-  question_002.png
-```
-
-Document mode, where each folder is a multi-page document:
-
-```text
-png/
-  exam_2024/
-    page_001.png
-    page_002.png
-```
-
-### 4. Run Ingestion
-
-```bash
+# Dry run — verify Ollama health + count documents
 python -m src.run_pipeline --dry-run
-python -m src.run_pipeline --limit 10
+
+# Smoke test — process 3 PNGs end-to-end
+python -m src.run_pipeline --limit 3
+
+# Full run — all 477 PNGs
 python -m src.run_pipeline
 ```
 
-or:
+Progress is tracked in `data/artifacts/{document_id}/manifest.json`.
+Re-running skips already-indexed documents automatically.
 
-```bash
-./scripts/run_pipeline.sh --limit 10
+### 5. Query
+
+```python
+import yaml
+from openai import OpenAI
+from src.vlm_generate import init_vlm_client
+from src.vlm_client import VlmClient
+from src.embed_text import TextEmbedder
+from src.qdrant_store import QdrantStore
+from src.query_agent import QueryAgent
+
+config = yaml.safe_load(open("config/settings.yaml"))
+
+raw_client = init_vlm_client("http://localhost:11434/v1")
+vlm        = VlmClient(raw_client, "qwen2.5-vl:7b")
+embedder   = TextEmbedder()
+store      = QdrantStore()
+agent      = QueryAgent(raw_client, "qwen2.5-vl:7b", embedder, store, config)
+
+results = agent.query("이차방정식 관련 어려운 문제")
+answer  = agent.answer("이차방정식 관련 어려운 문제", results)
 ```
 
-### 5. Run Search UI
-
-```bash
-streamlit run services/streamlit/app.py
-```
-
-Example queries:
-
-```text
-Find a hard calculus problem with a diagram
-삼각함수 다이어그램이 있는 문제
-이차방정식 관련 어려운 문제 찾아줘
-```
-
-## Parser Configuration
-
-`vector_db_pipeline/config/settings.yaml` controls the parser strategy:
-
-```yaml
-markdown_backend: "docling_vlm"
-
-parser:
-  default_backend: "docling_vlm"
-  enable_pure_vlm_fallback: true
-  benchmark_backends: []
-  quality_threshold: 0.5
-```
-
-Recommended modes:
-
-| Mode | Use case |
-| --- | --- |
-| `docling_vlm` | Default production path. Preserves structure and uses VLM selectively. |
-| `pure_vlm` | Direct Qwen transcription for degraded scans or parser benchmarks. |
-| `benchmark_backends: ["pure_vlm"]` | Save non-indexed comparison artifacts while indexing the default backend. |
-
-Artifacts are saved under:
-
-```text
-vector_db_pipeline/data/artifacts/{document_id}/
-  manifest.json
-  parsed_document.json
-  chunks.jsonl
-  markdown.md
-  figures/
-  benchmark/
-```
+---
 
 ## Data Model
 
-Main Qdrant collection: `exam_questions`
+Each indexed document is one exam question:
 
-```text
-text_vector
-visual_vector
-section_id
-section_title
-section_level
-page_range_start
-page_range_end
-document_id
-parser_backend
-difficulty
-topic
-has_math
-has_diagram
-markdown
-metadata_json
+| Field | Type | Description |
+|---|---|---|
+| `document_id` | `str` | PNG filename stem |
+| `text` | `str` | Full transcription — Korean text + LaTeX math |
+| `concepts` | `list[str]` | Mathematical concepts required (Korean terms) |
+| `description` | `str` | Natural language description of the image |
+
+The Qdrant collection stores a single `text_vector` (1024-dim, Cosine) per document
+with INT8 scalar quantization, reducing index size ~4x with negligible recall loss.
+
+---
+
+## Artifacts
+
+Each processed document writes two files under `data/artifacts/{document_id}/`:
+
+```
+result.json      # QuestionResult fields (text, concepts, description)
+manifest.json    # Status: "stored" | "failed" (enables safe resume)
 ```
 
-Figure collection: `exam_questions_figures`
+---
 
-```text
-figure_visual_vector
-figure_text_vector
-figure_id
-description
-page_number
-document_id
-section_id
-```
-
-## Quality Checks
+## Quality
 
 ```bash
-cd vector_db_pipeline
-ruff check src services tests
-pytest -q
+# Linting
+ruff check src tests
+
+# Tests (no external services required — everything mocked)
+pytest -v
 ```
 
-The test suite uses mocks for model calls, Docling, and Qdrant so it can run
-quickly without external services.
+---
 
-## Why This Project Matters
+## Why This Project
 
-Scanned educational documents combine OCR, layout understanding, math notation,
-Korean text, and visual reasoning. This pipeline demonstrates how to build a
-maintainable RAG ingestion system for that kind of data: structured where
-possible, multimodal where necessary, and reproducible enough to operate and
-debug.
+Korean math exam images are a genuinely hard retrieval problem:
+
+- Dense mathematical notation (LaTeX, handwritten symbols)
+- Korean text mixed with formulas
+- Diagrams and graphs that carry semantic meaning
+- No clean text layer — everything is image-only
+
+This pipeline shows a practical approach: let a vision-language model do the heavy
+lifting (transcription + concept extraction), then embed the resulting text for
+fast approximate search. The architecture is intentionally local-first — no tokens
+sent to third-party APIs, no cloud dependencies after the initial model download.
