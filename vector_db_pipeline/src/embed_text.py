@@ -1,35 +1,47 @@
 """
-embed_text.py — Text-only embedding using Qwen3-Embedding.
+embed_text.py — Text embedding using Qwen3-Embedding.
 
-Optimized for pure text retrieval (text → text search).
+Uses INT8 quantization via bitsandbytes when CUDA is available.
+Falls back to float16 on MPS and float32 on CPU.
 """
-
 
 import torch
 from transformers import AutoModel, AutoTokenizer
 
 
 class TextEmbedder:
-    """
-    Wraps Qwen3-Embedding for text-only vector generation.
-    """
+    """Wraps Qwen3-Embedding for text vector generation."""
 
     def __init__(
         self,
         model_name: str = "Qwen/Qwen3-Embedding-0.6B",
         device: str | None = None,
+        quantization: str | None = None,
     ):
         self.device = device or self._auto_device()
         print(f"[TextEmbedder] Loading {model_name} on {self.device}...")
 
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        dtype = torch.float16 if torch.cuda.is_available() else torch.float32
-        self.model = AutoModel.from_pretrained(
-            model_name,
-            torch_dtype=dtype,
-        ).to(self.device)
-        self.model.eval()
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
 
+        if quantization == "int8" and self.device == "cuda":
+            from transformers import BitsAndBytesConfig
+            quant_cfg = BitsAndBytesConfig(load_in_8bit=True)
+            self.model = AutoModel.from_pretrained(
+                model_name,
+                quantization_config=quant_cfg,
+                device_map="auto",
+                trust_remote_code=True,
+            )
+            print("[TextEmbedder] INT8 quantization enabled.")
+        else:
+            dtype = torch.float16 if self.device == "cuda" else torch.float32
+            self.model = AutoModel.from_pretrained(
+                model_name,
+                torch_dtype=dtype,
+                trust_remote_code=True,
+            ).to(self.device)
+
+        self.model.eval()
         print(f"[TextEmbedder] Ready. Output dim: {self.model.config.hidden_size}")
 
     def _auto_device(self) -> str:
@@ -46,7 +58,7 @@ class TextEmbedder:
 
     @torch.no_grad()
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
-        """Embed a batch of texts. Returns list of vectors."""
+        """Embed a batch of texts. Returns list of normalized vectors."""
         inputs = self.tokenizer(
             texts,
             padding=True,
@@ -54,11 +66,8 @@ class TextEmbedder:
             max_length=512,
             return_tensors="pt",
         ).to(self.device)
-
         outputs = self.model(**inputs)
-        # Mean pooling over token dimension
         embeddings = self._mean_pooling(outputs, inputs["attention_mask"])
-        # Normalize
         embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
         return embeddings.cpu().tolist()
 
@@ -72,7 +81,7 @@ class TextEmbedder:
         ) / torch.clamp(input_mask_expanded.sum(1), min=1e-9)
 
     def free(self):
-        """Release GPU memory."""
+        """Release GPU/MPS memory."""
         del self.model
         del self.tokenizer
         if self.device == "cuda":

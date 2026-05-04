@@ -1,44 +1,29 @@
 """
-vlm_generate.py — Generate structured markdown from exam images.
-
-Uses Qwen3.5-VL via vLLM (OpenAI-compatible API) to transcribe
-the image content into structured markdown with sections:
-  ## 문제 (Question)
-  ## 보기 (Options)
-  ## 정답 (Answer)
-  ## 해설 (Explanation)
+vlm_generate.py — VLM prompt and utilities for exam image parsing.
 """
 
 import base64
 
 from openai import OpenAI
 
-SYSTEM_PROMPT = """You are an expert Korean exam question transcriber.
-Your task is to read the given image and produce a clean, structured markdown
-transcription.
+SYSTEM_PROMPT = """You are an expert Korean math exam question analyzer.
+Given an exam question image, respond with ONLY a valid JSON object:
+
+{
+  "text": "full transcription of all text and math in the image",
+  "concepts": ["mathematical concept 1", "mathematical concept 2"],
+  "description": "brief description of what is visually in the image"
+}
 
 Rules:
-1. Use the following exact section headers:
-   ## 문제
-   ## 보기
-   ## 정답
-   ## 해설
-
-2. Write all mathematical formulas in LaTeX using $...$ for inline and
-   $$...$$ for block equations.
-
-3. Preserve the original Korean text exactly as it appears.
-
-4. If the image contains only part of the above sections
-   (e.g., just the question and options, no explanation),
-   include only the sections that are present.
-   Do NOT fabricate content that isn't in the image.
-
-5. For multiple-choice options, number them as ① ② ③ ④ ⑤.
-
-6. If there is a solution/explanation section, transcribe it step by step.
-
-7. Output ONLY the markdown. No preamble, no extra commentary."""
+1. "text": Transcribe all Korean text exactly as it appears. Write math in LaTeX \
+($...$ inline, $$...$$ block). Include the question number, all options (① ② ③ ④ ⑤), \
+and any given information.
+2. "concepts": List the mathematical concepts or abilities required to solve this problem \
+(e.g. ["이차방정식", "판별식", "근의 공식"]). Use Korean terms.
+3. "description": One or two sentences describing what is visually present \
+(e.g. "수식과 그래프가 포함된 이차방정식 문제입니다.").
+4. Output ONLY the JSON. No preamble, no extra commentary."""
 
 
 def encode_image_to_base64(image_path: str) -> str:
@@ -47,53 +32,6 @@ def encode_image_to_base64(image_path: str) -> str:
         return base64.b64encode(f.read()).decode("utf-8")
 
 
-def generate_markdown(
-    image_path: str,
-    client: OpenAI,
-    model_name: str,
-    max_tokens: int = 4096,
-    temperature: float = 0.1,
-) -> str:
-    """
-    Send the image to Qwen3.5-VL and return structured markdown.
-    """
-    b64_image = encode_image_to_base64(image_path)
-
-    response = client.chat.completions.create(
-        model=model_name,
-        messages=[
-            {
-                "role": "system",
-                "content": SYSTEM_PROMPT,
-            },
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/png;base64,{b64_image}",
-                        },
-                    },
-                    {
-                        "type": "text",
-                        "text": "Transcribe this exam image into structured markdown.",
-                    },
-                ],
-            },
-        ],
-        temperature=temperature,
-        max_tokens=max_tokens,
-    )
-
-    return response.choices[0].message.content.strip()
-
-
 def init_vlm_client(api_base: str, api_key: str | None = None) -> OpenAI:
-    """
-    Create an OpenAI-compatible client.
-
-    Uses an explicit API key when provided. Falls back to "not-needed" for
-    local vLLM and tests which require no auth.
-    """
-    return OpenAI(api_key=api_key or "not-needed", base_url=api_base)
+    """Create an OpenAI-compatible client pointing at Ollama or any compatible endpoint."""
+    return OpenAI(api_key=api_key or "ollama", base_url=api_base)

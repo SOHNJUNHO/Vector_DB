@@ -1,5 +1,5 @@
 """
-vlm_client.py — Shared OpenAI-compatible VLM operations.
+vlm_client.py — OpenAI-compatible VLM client (Ollama).
 """
 
 from __future__ import annotations
@@ -14,14 +14,14 @@ except ImportError:
 
 
 class VlmClient:
-    """Small task-oriented wrapper around an OpenAI-compatible multimodal client."""
+    """Task-oriented wrapper around an OpenAI-compatible multimodal client."""
 
     def __init__(
         self,
         client,
         model_name: str,
         *,
-        max_tokens: int = 4096,
+        max_tokens: int = 2048,
         temperature: float = 0.1,
     ):
         self.client = client
@@ -29,27 +29,10 @@ class VlmClient:
         self.max_tokens = max_tokens
         self.temperature = temperature
 
-    def transcribe_page(self, image_path: str, prompt: str | None = None) -> str:
-        return self.image_call(
-            image_path,
-            prompt or "Transcribe this exam image into structured markdown.",
-            system_prompt=SYSTEM_PROMPT,
-        )
-
-    def describe_figure(self, image_path: str, prompt: str) -> str:
-        return self.image_call(image_path, prompt)
-
-    def extract_metadata(self, markdown: str, prompt: str) -> dict:
-        response = self.text_call(f"{markdown}\n\n{prompt}", temperature=0.0, max_tokens=512)
-        parsed = parse_json_object(response)
-        if parsed:
-            return parsed
-        retry = self.text_call(
-            f"{prompt}\n\nContent:\n{markdown}\n\nReturn JSON only.",
-            temperature=0.0,
-            max_tokens=512,
-        )
-        return parse_json_object(retry)
+    def transcribe_page(self, image_path: str) -> dict:
+        """Send image to VLM. Returns parsed JSON dict {text, concepts, description}."""
+        raw = self.image_call(image_path, "Analyze this exam image.", system_prompt=SYSTEM_PROMPT)
+        return parse_json_object(raw)
 
     def image_call(
         self,
@@ -89,7 +72,7 @@ class VlmClient:
         text: str,
         *,
         temperature: float = 0.0,
-        max_tokens: int = 512,
+        max_tokens: int = 256,
     ) -> str:
         resp = self.client.chat.completions.create(
             model=self.model_name,

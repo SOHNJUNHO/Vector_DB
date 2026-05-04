@@ -14,16 +14,13 @@ authors = [
 dependencies = [
     "PyYAML>=6.0",
     "python-dotenv>=1.0",
-    "Pillow>=10.0",
     "tqdm>=4.65",
     "requests>=2.31",
     "openai>=1.0",
     "transformers>=4.48",
     "torch>=2.4",
     "qdrant-client>=1.9",
-    "google-cloud-storage>=2.0",
     "accelerate>=0.30",
-    "docling>=2.0",
 ]
 
 [project.optional-dependencies]
@@ -31,9 +28,7 @@ dev = [
     "pytest>=7.0",
     "ruff>=0.9",
     "pre-commit>=3.0",
-]
-streamlit = [
-    "streamlit>=1.35",
+    "bitsandbytes>=0.43",
 ]
 
 [tool.setuptools]

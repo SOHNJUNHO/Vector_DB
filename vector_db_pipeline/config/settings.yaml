@@ -2,114 +2,52 @@
 # Vector DB Pipeline — Configuration
 # ============================================================
 
-# Markdown generation backend: "pure_vlm" | "docling_vlm"
-markdown_backend: "docling_vlm"
-
-# --- Parser routing ---
-parser:
-  default_backend: "docling_vlm"
-  enable_pure_vlm_fallback: true
-  benchmark_backends: []
-  quality_threshold: 0.5
-
 # --- Pipeline behavior ---
 pipeline:
   batch_size: 50
 
 # --- Data paths ---
 data:
-  # Root directory containing png/ folder
   raw_dir: "/Users/sohn/Desktop/Vector_DB"
-  # Output dir for VLM-generated markdown (intermediate artifacts)
   output_dir: "/Users/sohn/Desktop/Vector_DB/vector_db_pipeline/data/processed"
-  # Stable per-document parser outputs and manifest state
   artifact_dir: "/Users/sohn/Desktop/Vector_DB/vector_db_pipeline/data/artifacts"
 
-# --- VLM inference ---
-# Fireworks AI (recommended — no GPU setup, pay per token):
-#   api_base  : https://api.fireworks.ai/openai/v1
-#   model_name: accounts/fireworks/models/qwen2-vl-72b-instruct
-#
-# Local vLLM (if you have a GPU):
-#   api_base  : http://localhost:8000/v1
-#   model_name: Qwen/Qwen3.5-VL-9B
-#
-# VLLM_API_BASE env var overrides api_base at runtime.
+# --- VLM (Ollama) ---
+# Run locally: ollama pull qwen2.5-vl:7b && ollama serve
+# OLLAMA_API_BASE env var overrides api_base at runtime.
 vlm:
-  api_base: "https://api.fireworks.ai/inference/v1"
-  model_name: "accounts/gamster-bb60br0oq2xx/deployments/ldfu44nx"
-  max_tokens: 4096
-  temperature: 0.1          # Low temp for deterministic output
-  health_check_retries: 3   # Retries before giving up
-  health_check_delay: 5     # Seconds between retries
+  api_base: "http://localhost:11434/v1"
+  model_name: "qwen2.5-vl:7b"
+  max_tokens: 2048
+  temperature: 0.1
+  health_check_retries: 3
+  health_check_delay: 5
 
-# --- Visual embedding (Qwen3-VL-Embedding-2B) ---
-embed_visual:
-  model_name: "Qwen/Qwen3-VL-Embedding-2B"
-  batch_size: 8
-
-# --- Text embedding (Qwen3-Embedding) ---
+# --- Text embedding (Qwen3-Embedding-0.6B, HuggingFace transformers) ---
+# quantization: "int8" applies bitsandbytes INT8 when CUDA is available.
+# Falls back to float16 on MPS and float32 on CPU automatically.
 embed_text:
-  # Smallest text-only model for speed; swap to 4B if you prefer quality
   model_name: "Qwen/Qwen3-Embedding-0.6B"
   batch_size: 32
+  quantization: "int8"
 
-# --- Docling + VLM hybrid parser ---
-document_parser:
-  # VLM enrichment triggers — math and tables handled by Docling natively
-  # Options: figures, chemical_formulas, handwritten, low_quality_page
-  complexity_triggers: [figures, chemical_formulas]
-
-  # Docling page quality grade below this value triggers full-page VLM fallback (0.0–1.0)
-  quality_threshold: 0.5
-
-  # Prompts — change per project without touching code
-  section_detection_prompt: |
-    Given this scanned page image and its extracted text, return JSON only:
-    {"is_new_section": true|false, "section_title": "string or null", "section_level": 1|2|3|null}
-    Mark a new section only when you see a clear heading that begins a new major topic.
-
-  figure_description_prompt: |
-    Describe this figure in full detail: all visual elements, labels, axes, values, and trends.
-    Write any math in LaTeX ($...$ inline, $$...$$ block). Be precise and complete.
-
-  metadata_prompt: |
-    Analyze this document section. Return ONLY a valid JSON object:
-    {
-      "subject": "...",
-      "difficulty": "easy|medium|hard",
-      "topic": "...",
-      "has_math": true|false,
-      "has_diagram": true|false
-    }
-
-# --- LlamaParse (alternative backend, no GPU required) ---
-llamaparse:
-  api_key: ""          # Leave blank to use LLAMA_CLOUD_API_KEY env var instead
-  language: "ko"       # Language hint for the parser
-
-# --- Qdrant Cloud ---
+# --- Qdrant (local Docker) ---
+# Start with: docker run -p 6333:6333 qdrant/qdrant
 qdrant:
-  # Qdrant Cloud cluster URL (e.g. https://xyz.qdrant.io)
-  # For local Docker: "http://localhost:6333"
-  url: ""
-  api_key: ""              # Leave blank to use QDRANT_API_KEY env var
+  url: "http://localhost:6333"
+  api_key: ""
   collection_name: "exam_questions"
-  visual_dim: 2048         # Qwen3-VL-Embedding-2B output dim
-  text_dim: 1024           # Qwen3-Embedding-0.6B output dim
+  text_dim: 1024
 
 # --- Query agent ---
 query:
   default_limit: 5
-  retrieval_mode: "hybrid"   # "text" | "hybrid"
-  hybrid_alpha: 0.7          # 1.0 = text only, 0.0 = visual-text only
   answer_context_limit: 3
   parse_prompt: |
     Given this query: "{query}"
     Return ONLY valid JSON:
-    {{"topic": "...", "difficulty": "easy|medium|hard|null", "limit": 5}}
-    - topic: the mathematical concept or subject area being asked about
-    - difficulty: null if the user did not specify a difficulty level
+    {{"topic": "...", "limit": 5}}
+    - topic: the mathematical concept or subject area (in Korean if possible)
     - limit: number of results requested (default 5)
   answer_prompt: |
     Answer the user query using only the retrieved context.
@@ -118,4 +56,4 @@ query:
     Retrieved context:
     {context}
 
-    Write a concise answer. If the context is not enough, say what is missing.
+    Write a concise answer in Korean. If the context is not enough, say what is missing.
